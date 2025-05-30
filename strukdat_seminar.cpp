@@ -7,7 +7,6 @@
 #include "base64.h"
 #include <fstream>
 #include <regex>
-#include <memory>
 
 using namespace std;
 
@@ -81,89 +80,68 @@ string decodeCertificateNumber(const string& encoded) {
 template <typename T>
 struct Node {
     T data;
-    std::unique_ptr<Node<T>> next;
-    Node(const T& d) : data(d), next(nullptr) {}
+    Node* next;
 };
 
 // Stack implementation
 template <typename T>
 class Stack {
 private:
-    std::unique_ptr<Node<T>> top;
+    Node<T>* top;
 public:
-    Stack() : top(nullptr) {}
-    ~Stack() = default;
+    Stack() { top = nullptr; }
+    ~Stack() { while (!isEmpty()) pop(); }
     void push(T value) {
-        auto newNode = std::make_unique<Node<T>>(value);
-        newNode->next = std::move(top);
-        top = std::move(newNode);
+        Node<T>* newNode = new Node<T>();
+        newNode->data = value;
+        newNode->next = top;
+        top = newNode;
     }
     void pop() {
         if (isEmpty()) return;
-        top = std::move(top->next);
+        Node<T>* temp = top;
+        top = top->next;
+        delete temp;
     }
     T peek() {
         if (isEmpty()) return T();
         return top->data;
     }
     bool isEmpty() { return top == nullptr; }
-    // Deep clone for iteration
-    Stack<T> clone() const {
-        Stack<T> temp, result;
-        Node<T>* curr = top.get();
-        while (curr) {
-            temp.push(curr->data);
-            curr = curr->next.get();
-        }
-        // Reverse temp into result to preserve order
-        while (!temp.isEmpty()) {
-            result.push(temp.peek());
-            temp.pop();
-        }
-        return result;
-    }
 };
 
 // Queue implementation
 template <typename T>
 class Queue {
 private:
-    std::unique_ptr<Node<T>> front;
+    Node<T>* front;
     Node<T>* rear;
 public:
-    Queue() : front(nullptr), rear(nullptr) {}
-    ~Queue() = default;
+    Queue() { front = rear = nullptr; }
+    ~Queue() { while (!isEmpty()) dequeue(); }
     void enqueue(T value) {
-        auto newNode = std::make_unique<Node<T>>(value);
-        Node<T>* newRear = newNode.get();
+        Node<T>* newNode = new Node<T>();
+        newNode->data = value;
+        newNode->next = nullptr;
         if (rear == nullptr) {
-            front = std::move(newNode);
-            rear = newRear;
-        } else {
-            rear->next = std::move(newNode);
-            rear = newRear;
+            front = rear = newNode;
+            return;
         }
+        rear->next = newNode;
+        rear = newNode;
     }
     void dequeue() {
         if (isEmpty()) return;
-        front = std::move(front->next);
-        if (!front) rear = nullptr;
+        Node<T>* temp = front;
+        front = front->next;
+        if (front == nullptr) rear = nullptr;
+        delete temp;
     }
     T peek() {
         if (isEmpty()) return T();
         return front->data;
     }
     bool isEmpty() { return front == nullptr; }
-    // Deep clone for iteration
-    Queue<T> clone() const {
-        Queue<T> result;
-        Node<T>* curr = front.get();
-        while (curr) {
-            result.enqueue(curr->data);
-            curr = curr->next.get();
-        }
-        return result;
-    }
 };
 
 // Struktur Data untuk Sistem Manajemen Seminar
@@ -197,7 +175,7 @@ private:
         // Schedules (history stack, bottom to top)
         ofs << "[SCHEDULES]\n";
         vector<pair<string, string>> temp;
-        auto copy = history.clone();
+        Stack<pair<string, string>> copy = history;
         while (!copy.isEmpty()) {
             temp.push_back(copy.peek());
             copy.pop();
@@ -207,7 +185,7 @@ private:
         }
         // Question Queue
         ofs << "[QUESTION_QUEUE]\n";
-        auto qcopy = questionQueue.clone();
+        Queue<string> qcopy = questionQueue;
         while (!qcopy.isEmpty()) {
             ofs << qcopy.peek() << '\n';
             qcopy.dequeue();
@@ -404,7 +382,7 @@ public:
     // Delete schedule by index (1-based, from bottom)
     void deleteSchedule(int idx) {
         vector<pair<string, string>> temp;
-        auto copy = history.clone();
+        Stack<pair<string, string>> copy = history;
         while (!copy.isEmpty()) {
             temp.push_back(copy.peek());
             copy.pop();
@@ -425,7 +403,7 @@ public:
     // Update schedule by index (1-based, from bottom)
     void updateSchedule(int idx, const string& newDate, const string& newTopic) {
         vector<pair<string, string>> temp;
-        auto copy = history.clone();
+        Stack<pair<string, string>> copy = history;
         while (!copy.isEmpty()) {
             temp.push_back(copy.peek());
             copy.pop();
@@ -446,7 +424,7 @@ public:
     // Delete question from queue by index (1-based, front is 1)
     void deleteQuestionFromQueue(int idx) {
         vector<string> temp;
-        auto copy = questionQueue.clone();
+        Queue<string> copy = questionQueue;
         while (!copy.isEmpty()) {
             temp.push_back(copy.peek());
             copy.dequeue();
@@ -465,7 +443,7 @@ public:
     // Update question in queue by index (1-based, front is 1)
     void updateQuestionInQueue(int idx, const string& newName) {
         vector<string> temp;
-        auto copy = questionQueue.clone();
+        Queue<string> copy = questionQueue;
         while (!copy.isEmpty()) {
             temp.push_back(copy.peek());
             copy.dequeue();
@@ -658,7 +636,7 @@ int main() {
                     manager.updateAnsweredQuestion(idx, newAnswer);
                 } else if (sub == 6) {
                     vector<string> temp;
-                    auto copy = manager.getQuestionQueue().clone();
+                    Queue<string> copy = manager.getQuestionQueue();
                     while (!copy.isEmpty()) {
                         temp.push_back(copy.peek());
                         copy.dequeue();
@@ -674,7 +652,7 @@ int main() {
                     manager.deleteQuestionFromQueue(idx);
                 } else if (sub == 7) {
                     vector<string> temp;
-                    auto copy = manager.getQuestionQueue().clone();
+                    Queue<string> copy = manager.getQuestionQueue();
                     while (!copy.isEmpty()) {
                         temp.push_back(copy.peek());
                         copy.dequeue();
@@ -731,7 +709,7 @@ int main() {
                     manager.undoSchedule();
                 } else if (sub == 3) {
                     vector<pair<string, string>> temp;
-                    auto copy = manager.getHistory().clone();
+                    Stack<pair<string, string>> copy = manager.getHistory();
                     while (!copy.isEmpty()) {
                         temp.push_back(copy.peek());
                         copy.pop();
@@ -747,7 +725,7 @@ int main() {
                     manager.deleteSchedule(idx);
                 } else if (sub == 4) {
                     vector<pair<string, string>> temp;
-                    auto copy = manager.getHistory().clone();
+                    Stack<pair<string, string>> copy = manager.getHistory();
                     while (!copy.isEmpty()) {
                         temp.push_back(copy.peek());
                         copy.pop();
