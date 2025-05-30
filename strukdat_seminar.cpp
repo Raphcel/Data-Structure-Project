@@ -240,6 +240,13 @@ public:
     SeminarManager() { loadAllDataFromFile(); }
     // Pendaftaran peserta
     void registerParticipant(string name) {
+        // Prevent duplicate name
+        for (const auto& p : participants) {
+            if (p.name == name) {
+                cout << "Nama peserta sudah terdaftar!\n";
+                return;
+            }
+        }
         participants.push_back(Participant(name));
         saveAllDataToFile();
         cout << name << " berhasil terdaftar!\n";
@@ -463,6 +470,7 @@ public:
     // Expose history for menu display
     const Stack<pair<string, string>>& getHistory() const { return history; }
     const Queue<string>& getQuestionQueue() const { return questionQueue; }
+    const vector<Participant>& getParticipants() const { return participants; } // Expose participants for duplication check
 };
 
 // Fungsi tampilan header
@@ -542,11 +550,23 @@ int main() {
                 cin.ignore();
                 if (sub == 1) {
                     string name;
+                    bool valid = false;
                     do {
                         cout << "Masukkan nama peserta: ";
                         getline(cin, name);
                         if (name.empty()) cout << "Nama peserta tidak boleh kosong!\n";
-                    } while (name.empty());
+                        else {
+                            // Cek duplikat
+                            valid = true;
+                            for (const auto& p : manager.getParticipants()) {
+                                if (p.name == name) {
+                                    cout << "Nama peserta sudah terdaftar!\n";
+                                    valid = false;
+                                    break;
+                                }
+                            }
+                        }
+                    } while (name.empty() || !valid);
                     manager.registerParticipant(name);
                 } else if (sub == 2) {
                     int sortChoice;
