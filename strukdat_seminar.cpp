@@ -16,9 +16,13 @@ using namespace std;
 struct Participant {
     string name;
     time_t registrationTime;
+    string seminarDate;    // Jadwal seminar yang dipilih
+    string seminarTopic;   // Topik seminar yang dipilih
 
-    Participant(string n) {
+    Participant(string n, string date, string topic) {
         name = n;
+        seminarDate = date;
+        seminarTopic = topic;
         registrationTime = time(0);
     }
     // Default constructor untuk penggunaan vector resize atau map jika diperlukan
@@ -28,12 +32,13 @@ struct Participant {
 // Fungsi untuk membuat sertifikat peserta
 string generateCertificate(const Participant &participant) {
     stringstream ss;
-    string certRaw = participant.name + to_string(participant.registrationTime);
+    string certRaw = participant.name + participant.seminarDate + participant.seminarTopic + to_string(participant.registrationTime);
     // Asumsikan base64_encode didefinisikan dengan benar di "base64.h"
     string certNumber = base64_encode(reinterpret_cast<const unsigned char*>(certRaw.c_str()), certRaw.length());
     ss << "Sertifikat Seminar\n";
     ss << "====================\n";
     ss << "Nama: " << participant.name << "\n";
+    ss << "Jadwal: " << participant.seminarDate << " - " << participant.seminarTopic << "\n";
     ss << "Nomor Sertifikat (terenkripsi): " << certNumber << "\n";
     ss << "Waktu Pendaftaran: " << put_time(localtime(&participant.registrationTime), "%Y-%m-%d %H:%M:%S") << "\n"; // Menggunakan put_time untuk format konsisten
     return ss.str();
@@ -214,7 +219,7 @@ private:
             return;
         }
         for (const auto& p : participants) {
-            ofs << p.name << "," << p.registrationTime << "\n";
+            ofs << p.name << "," << p.registrationTime << "," << p.seminarDate << "," << p.seminarTopic << "\n";
         }
         ofs.close();
     }
@@ -269,16 +274,17 @@ private:
     // --- Metode Pemuatan CSV ---
     void loadParticipantsFromFile() {
         ifstream ifs(participantsFile);
-        if (!ifs) { /* cerr << "Info: " << participantsFile << " tidak ditemukan. Memulai dari awal." << endl; */ return; }
+        if (!ifs) { return; }
         participants.clear();
         string line;
         while (getline(ifs, line)) {
             stringstream ss(line);
-            string name, timeStr;
-            if (getline(ss, name, ',') && getline(ss, timeStr)) {
+            string name, timeStr, seminarDate, seminarTopic;
+            if (getline(ss, name, ',') && getline(ss, timeStr, ',') && 
+                getline(ss, seminarDate, ',') && getline(ss, seminarTopic)) {
                 try {
                     time_t regTime = static_cast<time_t>(stoll(timeStr));
-                    Participant p(name); // Mengatur waktu saat ini, lalu menimpanya
+                    Participant p(name, seminarDate, seminarTopic);
                     p.registrationTime = regTime;
                     participants.push_back(p);
                 } catch (const std::invalid_argument& ia) {
@@ -358,16 +364,16 @@ private:
 public:
     SeminarManager() { loadAllDataFromCsvFiles(); }
 
-    void registerParticipant(string name) {
+    void registerParticipant(string name, string seminarDate, string seminarTopic) {
         for (const auto& p : participants) {
-            if (p.name == name) {
-                cout << "Nama peserta sudah terdaftar!\n";
+            if (p.name == name && p.seminarDate == seminarDate && p.seminarTopic == seminarTopic) {
+                cout << "Nama peserta sudah terdaftar untuk jadwal ini!\n";
                 return;
             }
         }
-        participants.push_back(Participant(name));
+        participants.push_back(Participant(name, seminarDate, seminarTopic));
         saveAllDataToCsvFiles();
-        cout << name << " berhasil terdaftar!\n";
+        cout << name << " berhasil terdaftar untuk seminar '" << seminarTopic << "' pada " << seminarDate << "!\n";
     }
 
     void showParticipants(bool ascending) {
@@ -375,7 +381,6 @@ public:
             cout << "Belum ada peserta yang terdaftar.\n";
             return;
         }
-        // Buat salinan untuk pengurutan agar tidak mengubah urutan pendaftaran asli jika diperlukan di tempat lain
         vector<Participant> sortedParticipants = participants;
         sort(sortedParticipants.begin(), sortedParticipants.end(), [ascending](const Participant &a, const Participant &b) {
             return ascending ? a.registrationTime < b.registrationTime : a.registrationTime > b.registrationTime;
@@ -383,9 +388,9 @@ public:
 
         cout << "\nDaftar Peserta (Urutan " << (ascending ? "Terlama ke Terbaru" : "Terbaru ke Terlama") << "):\n";
         for (size_t i = 0; i < sortedParticipants.size(); i++) {
-            // Gunakan put_time untuk output terformat dari registrationTime
-            cout << i + 1 << ". " << sortedParticipants[i].name << " (Terdaftar: "
-                 << put_time(localtime(&sortedParticipants[i].registrationTime), "%Y-%m-%d %H:%M:%S") << ")\n";
+            cout << i + 1 << ". " << sortedParticipants[i].name 
+                 << " (Jadwal: " << sortedParticipants[i].seminarDate << " - " << sortedParticipants[i].seminarTopic 
+                 << ", Terdaftar: " << put_time(localtime(&sortedParticipants[i].registrationTime), "%Y-%m-%d %H:%M:%S") << ")\n";
         }
     }
 
@@ -397,8 +402,9 @@ public:
         }
         cout << "\nDaftar Peserta Saat Ini:\n";
         for (size_t i = 0; i < participants.size(); i++) {
-            cout << i + 1 << ". " << participants[i].name << " (Terdaftar: "
-                 << put_time(localtime(&participants[i].registrationTime), "%Y-%m-%d %H:%M:%S") << ")\n";
+            cout << i + 1 << ". " << participants[i].name 
+                 << " (Jadwal: " << participants[i].seminarDate << " - " << participants[i].seminarTopic 
+                 << ", Terdaftar: " << put_time(localtime(&participants[i].registrationTime), "%Y-%m-%d %H:%M:%S") << ")\n";
         }
     }
 
@@ -701,27 +707,49 @@ int main() {
                 cin.ignore(numeric_limits<streamsize>::max(), '\n');
 
                 if (sub == 1) {
+                    // Pilih jadwal seminar terlebih dahulu
+                    vector<pair<string, string>> schedules = manager.getHistory().getAllElements();
+                    if (schedules.empty()) {
+                        cout << "Belum ada jadwal seminar. Tidak dapat mendaftar peserta.\n";
+                        continue;
+                    }
+                    cout << "\nPilih Jadwal Seminar untuk Pendaftaran:\n";
+                    for (size_t i = 0; i < schedules.size(); ++i) {
+                        cout << i + 1 << ". Tanggal: " << schedules[i].first << " - Topik: " << schedules[i].second << endl;
+                    }
+                    int scheduleIdx;
+                    cout << "Masukkan nomor jadwal seminar: ";
+                    cin >> scheduleIdx;
+                    if (cin.fail() || scheduleIdx < 1 || scheduleIdx > (int)schedules.size()) {
+                        cin.clear();
+                        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                        cout << "Pilihan jadwal tidak valid.\n";
+                        continue;
+                    }
+                    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                    string seminarDate = schedules[scheduleIdx - 1].first;
+                    string seminarTopic = schedules[scheduleIdx - 1].second;
+
                     string name;
                     bool name_is_valid_for_registration;
                     do {
-                        name_is_valid_for_registration = true; // Asumsikan true pada awalnya
+                        name_is_valid_for_registration = true;
                         cout << "Masukkan nama peserta: ";
                         getline(cin, name);
                         if (name.empty()) {
                             cout << "Nama peserta tidak boleh kosong!\n";
                             name_is_valid_for_registration = false;
                         } else {
-                            // Periksa duplikat secara lokal sebelum memanggil manajer untuk memberikan umpan balik segera untuk entri ulang
                             for (const auto& p : manager.getParticipants()) {
-                                if (p.name == name) {
-                                    cout << "Nama peserta sudah terdaftar! Silakan masukkan nama lain.\n";
+                                if (p.name == name && p.seminarDate == seminarDate && p.seminarTopic == seminarTopic) {
+                                    cout << "Nama peserta sudah terdaftar untuk jadwal ini! Silakan masukkan nama lain.\n";
                                     name_is_valid_for_registration = false;
                                     break;
                                 }
                             }
                         }
                     } while (!name_is_valid_for_registration);
-                    manager.registerParticipant(name); // Manajer akan melakukan pemeriksaan akhir dan menambahkan
+                    manager.registerParticipant(name, seminarDate, seminarTopic);
                 } else if (sub == 2) {
                     int sortChoice;
                     cout << "\nPilih metode sorting:\n";
