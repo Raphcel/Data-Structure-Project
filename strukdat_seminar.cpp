@@ -3,11 +3,12 @@
 #include <algorithm>
 #include <ctime>
 #include <sstream>
-#include <iomanip>
-#include "base64.h"
+#include <iomanip> // Untuk std::put_time
+#include "base64.h" // Pastikan base64.h ada di direktori proyek Anda
 #include <fstream>
 #include <regex>
-#include <memory>
+#include <stdexcept> // Untuk std::stoll, std::invalid_argument, std::out_of_range
+#include <limits>    // Untuk std::numeric_limits
 
 using namespace std;
 
@@ -20,37 +21,47 @@ struct Participant {
         name = n;
         registrationTime = time(0);
     }
+    // Default constructor untuk penggunaan vector resize atau map jika diperlukan
+    Participant() : registrationTime(0) {}
 };
 
 // Fungsi untuk membuat sertifikat peserta
 string generateCertificate(const Participant &participant) {
     stringstream ss;
     string certRaw = participant.name + to_string(participant.registrationTime);
+    // Asumsikan base64_encode didefinisikan dengan benar di "base64.h"
     string certNumber = base64_encode(reinterpret_cast<const unsigned char*>(certRaw.c_str()), certRaw.length());
     ss << "Sertifikat Seminar\n";
     ss << "====================\n";
     ss << "Nama: " << participant.name << "\n";
     ss << "Nomor Sertifikat (terenkripsi): " << certNumber << "\n";
-    ss << "Waktu Pendaftaran: " << ctime(&participant.registrationTime);
+    ss << "Waktu Pendaftaran: " << put_time(localtime(&participant.registrationTime), "%Y-%m-%d %H:%M:%S") << "\n"; // Menggunakan put_time untuk format konsisten
     return ss.str();
 }
 
-// Base64 decoding function (from cpp-base64)
-#include <stdexcept>
-#include <cctype>
+// --- Awal utilitas dekode Base64 (seperti yang diberikan dalam kode asli) ---
+// Ini ada di sini jika Anda ingin menggunakannya nanti. Saat ini, decodeCertificateNumber tidak dipanggil.
+static const std::string base64_chars_local = // Diganti nama untuk menghindari konflik jika base64.h memiliki miliknya sendiri
+             "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+             "abcdefghijklmnopqrstuvwxyz"
+             "0123456789+/";
 
-static std::string base64_decode(std::string const& encoded_string) {
+static inline bool is_base64_local(unsigned char c) { // Diganti nama
+  return (isalnum(c) || (c == '+') || (c == '/'));
+}
+
+static std::string base64_decode_local(std::string const& encoded_string) { // Diganti nama
     int in_len = encoded_string.size();
     int i = 0;
     int j = 0;
     int in_ = 0;
     unsigned char char_array_4[4], char_array_3[3];
     std::string ret;
-    while (in_len-- && ( encoded_string[in_] != '=') && is_base64(encoded_string[in_])) {
+    while (in_len-- && ( encoded_string[in_] != '=') && is_base64_local(encoded_string[in_])) {
         char_array_4[i++] = encoded_string[in_]; in_++;
         if (i ==4) {
             for (i = 0; i <4; i++)
-                char_array_4[i] = base64_chars.find(char_array_4[i]);
+                char_array_4[i] = base64_chars_local.find(char_array_4[i]);
             char_array_3[0] = ( char_array_4[0] << 2 ) + ( ( char_array_4[1] & 0x30 ) >> 4 );
             char_array_3[1] = ( ( char_array_4[1] & 0xf ) << 4 ) + ( ( char_array_4[2] & 0x3c ) >> 2 );
             char_array_3[2] = ( ( char_array_4[2] & 0x3 ) << 6 ) + char_array_4[3];
@@ -63,7 +74,7 @@ static std::string base64_decode(std::string const& encoded_string) {
         for (j = i; j <4; j++)
             char_array_4[j] = 0;
         for (j = 0; j <4; j++)
-            char_array_4[j] = base64_chars.find(char_array_4[j]);
+            char_array_4[j] = base64_chars_local.find(char_array_4[j]);
         char_array_3[0] = ( char_array_4[0] << 2 ) + ( ( char_array_4[1] & 0x30 ) >> 4 );
         char_array_3[1] = ( ( char_array_4[1] & 0xf ) << 4 ) + ( ( char_array_4[2] & 0x3c ) >> 2 );
         char_array_3[2] = ( ( char_array_4[2] & 0x3 ) << 6 ) + char_array_4[3];
@@ -72,263 +83,373 @@ static std::string base64_decode(std::string const& encoded_string) {
     return ret;
 }
 
-// Fungsi untuk mendekripsi nomor sertifikat peserta
+// Fungsi untuk mendekripsi nomor sertifikat peserta (tidak digunakan dalam alur program saat ini)
 string decodeCertificateNumber(const string& encoded) {
-    return base64_decode(encoded);
+    return base64_decode_local(encoded);
 }
+// --- Akhir utilitas dekode Base64 ---
 
-// Node structure for Stack and Queue
+
+// Struktur Node untuk Stack dan Queue
 template <typename T>
 struct Node {
     T data;
-    std::unique_ptr<Node<T>> next;
-    Node(const T& d) : data(d), next(nullptr) {}
+    Node* next;
+    Node(T val) : data(val), next(nullptr) {} // Konstruktor untuk kemudahan
 };
 
-// Stack implementation
+// Implementasi Stack
 template <typename T>
 class Stack {
 private:
-    std::unique_ptr<Node<T>> top;
+    Node<T>* top;
+    int count; // Untuk melacak ukuran
 public:
-    Stack() : top(nullptr) {}
-    ~Stack() = default;
+    Stack() : top(nullptr), count(0) {}
+    ~Stack() { while (!isEmpty()) pop(); }
     void push(T value) {
-        auto newNode = std::make_unique<Node<T>>(value);
-        newNode->next = std::move(top);
-        top = std::move(newNode);
+        Node<T>* newNode = new Node<T>(value);
+        newNode->next = top;
+        top = newNode;
+        count++;
     }
     void pop() {
         if (isEmpty()) return;
-        top = std::move(top->next);
+        Node<T>* temp = top;
+        top = top->next;
+        delete temp;
+        count--;
     }
     T peek() {
-        if (isEmpty()) return T();
+        if (isEmpty()) return T(); // Mengembalikan T yang dibangun secara default
         return top->data;
     }
-    bool isEmpty() { return top == nullptr; }
-    // Deep clone for iteration
-    Stack<T> clone() const {
-        Stack<T> temp, result;
-        Node<T>* curr = top.get();
-        while (curr) {
-            temp.push(curr->data);
-            curr = curr->next.get();
+    bool isEmpty() const { return top == nullptr; } // Dibuat const
+    int size() const { return count; } // Menambahkan metode size
+
+    vector<T> getAllElements() const {
+        vector<T> elements;
+        Node<T>* current = top;
+        while(current != nullptr) {
+            elements.push_back(current->data);
+            current = current->next;
         }
-        // Reverse temp into result to preserve order
-        while (!temp.isEmpty()) {
-            result.push(temp.peek());
-            temp.pop();
-        }
-        return result;
+        reverse(elements.begin(), elements.end()); // Untuk mendapatkan urutan dari bawah ke atas
+        return elements;
     }
 };
 
-// Queue implementation
+// Implementasi Queue
 template <typename T>
 class Queue {
 private:
-    std::unique_ptr<Node<T>> front;
+    Node<T>* front;
     Node<T>* rear;
+    int count;
 public:
-    Queue() : front(nullptr), rear(nullptr) {}
-    ~Queue() = default;
+    Queue() : front(nullptr), rear(nullptr), count(0) {}
+    ~Queue() { while (!isEmpty()) dequeue(); }
     void enqueue(T value) {
-        auto newNode = std::make_unique<Node<T>>(value);
-        Node<T>* newRear = newNode.get();
+        Node<T>* newNode = new Node<T>(value);
         if (rear == nullptr) {
-            front = std::move(newNode);
-            rear = newRear;
+            front = rear = newNode;
         } else {
-            rear->next = std::move(newNode);
-            rear = newRear;
+            rear->next = newNode;
+            rear = newNode;
         }
+        count++;
     }
     void dequeue() {
         if (isEmpty()) return;
-        front = std::move(front->next);
-        if (!front) rear = nullptr;
+        Node<T>* temp = front;
+        front = front->next;
+        if (front == nullptr) rear = nullptr;
+        delete temp;
+        count--;
     }
     T peek() {
-        if (isEmpty()) return T();
+        if (isEmpty()) return T(); // Mengembalikan T yang dibangun secara default
         return front->data;
     }
-    bool isEmpty() { return front == nullptr; }
-    // Deep clone for iteration
-    Queue<T> clone() const {
-        Queue<T> result;
-        Node<T>* curr = front.get();
-        while (curr) {
-            result.enqueue(curr->data);
-            curr = curr->next.get();
+    bool isEmpty() const { return front == nullptr; } // Dibuat const
+    int size() const { return count; } // Menambahkan metode size
+
+    vector<T> getAllElements() const {
+        vector<T> elements;
+        Node<T>* current = front;
+        while(current != nullptr) {
+            elements.push_back(current->data);
+            current = current->next;
         }
-        return result;
+        return elements; // Urutan dari depan ke belakang
     }
 };
+
+// Tambahkan struct untuk pertanyaan
+typedef struct Question {
+    string name;
+    string question;
+    Question() {}
+    Question(const string& n, const string& q) : name(n), question(q) {}
+} Question;
 
 // Struktur Data untuk Sistem Manajemen Seminar
 class SeminarManager {
 private:
-    Queue<string> questionQueue; // Antrian pertanyaan peserta menggunakan Queue
-    vector<pair<string, string>> answeredQuestions; // Daftar pertanyaan yang telah dijawab
-    vector<Participant> participants; // Data peserta
+    Queue<Question> questionQueue;
+    vector<pair<string, string>> answeredQuestions;
+    vector<Participant> participants;
     Stack<pair<string, string>> history; // Stack untuk undo topik/jadwal
-    const string dataFile = "seminar_data.txt";
 
-    // Helper struct for schedule
-    struct Schedule {
-        string date;
-        string topic;
-    };
+    const string participantsFile = "participants.csv";
+    const string answeredQuestionsFile = "answered_questions.csv";
+    const string schedulesFile = "schedules.csv";
+    const string questionQueueFile = "question_queue.csv";
 
-    // Helper to save all data to one file
-    void saveAllDataToFile() {
-        ofstream ofs(dataFile, ios::trunc);
-        // Participants
-        ofs << "[PARTICIPANTS]\n";
+    // --- Metode Penyimpanan CSV ---
+    void saveParticipantsToFile() {
+        ofstream ofs(participantsFile, ios::trunc);
+        if (!ofs) {
+            cerr << "Error: Tidak dapat membuka " << participantsFile << " untuk penulisan." << endl;
+            return;
+        }
         for (const auto& p : participants) {
-            ofs << p.name << '\t' << p.registrationTime << '\n';
-        }
-        // Answered Questions
-        ofs << "[ANSWERED_QUESTIONS]\n";
-        for (const auto& q : answeredQuestions) {
-            ofs << q.first << '\t' << q.second << '\n';
-        }
-        // Schedules (history stack, bottom to top)
-        ofs << "[SCHEDULES]\n";
-        vector<pair<string, string>> temp;
-        auto copy = history.clone();
-        while (!copy.isEmpty()) {
-            temp.push_back(copy.peek());
-            copy.pop();
-        }
-        for (auto it = temp.rbegin(); it != temp.rend(); ++it) {
-            ofs << it->first << '\t' << it->second << '\n';
-        }
-        // Question Queue
-        ofs << "[QUESTION_QUEUE]\n";
-        auto qcopy = questionQueue.clone();
-        while (!qcopy.isEmpty()) {
-            ofs << qcopy.peek() << '\n';
-            qcopy.dequeue();
+            ofs << p.name << "," << p.registrationTime << "\n";
         }
         ofs.close();
     }
 
-    // Helper to load all data from one file
-    void loadAllDataFromFile() {
-        ifstream ifs(dataFile);
-        if (!ifs.is_open()) return;
+    void saveAnsweredQuestionsToFile() {
+        ofstream ofs(answeredQuestionsFile, ios::trunc);
+        if (!ofs) {
+            cerr << "Error: Tidak dapat membuka " << answeredQuestionsFile << " untuk penulisan." << endl;
+            return;
+        }
+        for (const auto& q : answeredQuestions) {
+            // CSV Dasar: mengasumsikan nama penanya dan jawaban tidak mengandung koma atau baris baru
+            ofs << q.first << "," << q.second << "\n";
+        }
+        ofs.close();
+    }
+
+    void saveSchedulesToFile() {
+        ofstream ofs(schedulesFile, ios::trunc);
+        if (!ofs) {
+            cerr << "Error: Tidak dapat membuka " << schedulesFile << " untuk penulisan." << endl;
+            return;
+        }
+        vector<pair<string, string>> temp = history.getAllElements(); // Mendapatkan elemen dari bawah ke atas
+        for (const auto& schedule : temp) {
+            // CSV Dasar: mengasumsikan tanggal dan topik tidak mengandung koma atau baris baru
+            ofs << schedule.first << "," << schedule.second << "\n";
+        }
+        ofs.close();
+    }
+
+    void saveQuestionQueueToFile() {
+        ofstream ofs(questionQueueFile, ios::trunc);
+        if (!ofs) {
+            cerr << "Error: Tidak dapat membuka " << questionQueueFile << " untuk penulisan." << endl;
+            return;
+        }
+        vector<Question> temp = questionQueue.getAllElements();
+        for (const auto& q : temp) {
+            ofs << q.name << "," << q.question << "\n";
+        }
+        ofs.close();
+    }
+
+    void saveAllDataToCsvFiles() {
+        saveParticipantsToFile();
+        saveAnsweredQuestionsToFile();
+        saveSchedulesToFile();
+        saveQuestionQueueToFile();
+    }
+
+    // --- Metode Pemuatan CSV ---
+    void loadParticipantsFromFile() {
+        ifstream ifs(participantsFile);
+        if (!ifs) { /* cerr << "Info: " << participantsFile << " tidak ditemukan. Memulai dari awal." << endl; */ return; }
         participants.clear();
-        answeredQuestions.clear();
-        while (!history.isEmpty()) history.pop();
-        while (!questionQueue.isEmpty()) questionQueue.dequeue();
-        string line, section;
+        string line;
         while (getline(ifs, line)) {
-            if (line == "[PARTICIPANTS]" || line == "[ANSWERED_QUESTIONS]" || line == "[SCHEDULES]" || line == "[QUESTION_QUEUE]") {
-                section = line;
-                continue;
-            }
-            if (section == "[PARTICIPANTS]") {
-                size_t tabPos = line.find('\t');
-                if (tabPos != string::npos) {
-                    string name = line.substr(0, tabPos);
-                    time_t regTime = static_cast<time_t>(stoll(line.substr(tabPos + 1)));
-                    Participant p(name);
+            stringstream ss(line);
+            string name, timeStr;
+            if (getline(ss, name, ',') && getline(ss, timeStr)) {
+                try {
+                    time_t regTime = static_cast<time_t>(stoll(timeStr));
+                    Participant p(name); // Mengatur waktu saat ini, lalu menimpanya
                     p.registrationTime = regTime;
                     participants.push_back(p);
+                } catch (const std::invalid_argument& ia) {
+                    cerr << "Error memuat peserta: Format time_t tidak valid di baris: " << line << endl;
+                } catch (const std::out_of_range& oor) {
+                    cerr << "Error memuat peserta: Nilai time_t di luar jangkauan di baris: " << line << endl;
                 }
-            } else if (section == "[ANSWERED_QUESTIONS]") {
-                size_t tabPos = line.find('\t');
-                if (tabPos != string::npos) {
-                    string name = line.substr(0, tabPos);
-                    string answer = line.substr(tabPos + 1);
-                    answeredQuestions.push_back({name, answer});
-                }
-            } else if (section == "[SCHEDULES]") {
-                size_t tabPos = line.find('\t');
-                if (tabPos != string::npos) {
-                    string date = line.substr(0, tabPos);
-                    string topic = line.substr(tabPos + 1);
-                    history.push({date, topic});
-                }
-            } else if (section == "[QUESTION_QUEUE]") {
-                if (!line.empty()) questionQueue.enqueue(line);
             }
         }
         ifs.close();
     }
+
+    void loadAnsweredQuestionsFromFile() {
+        ifstream ifs(answeredQuestionsFile);
+        if (!ifs) { /* cerr << "Info: " << answeredQuestionsFile << " tidak ditemukan. Memulai dari awal." << endl; */ return; }
+        answeredQuestions.clear();
+        string line;
+        while (getline(ifs, line)) {
+            stringstream ss(line);
+            string name, answer;
+            // Asumsikan jawaban adalah sisa baris setelah koma pertama
+            size_t comma_pos = line.find(',');
+            if (comma_pos != string::npos) {
+                name = line.substr(0, comma_pos);
+                answer = line.substr(comma_pos + 1);
+                answeredQuestions.push_back({name, answer});
+            }
+        }
+        ifs.close();
+    }
+
+    void loadSchedulesFromFile() {
+        ifstream ifs(schedulesFile);
+        if (!ifs) { /* cerr << "Info: " << schedulesFile << " tidak ditemukan. Memulai dari awal." << endl; */ return; }
+        // Bersihkan stack sebelum memuat
+        while (!history.isEmpty()) history.pop();
+        string line;
+        while (getline(ifs, line)) {
+            stringstream ss(line);
+            string date, topic;
+            // Asumsikan topik adalah sisa baris setelah koma pertama
+            size_t comma_pos = line.find(',');
+            if (comma_pos != string::npos) {
+                date = line.substr(0, comma_pos);
+                topic = line.substr(comma_pos + 1);
+                history.push({date, topic}); // Dimuat berurutan, akan menjadi urutan stack yang benar
+            }
+        }
+        ifs.close();
+    }
+
+    void loadQuestionQueueFromFile() {
+        ifstream ifs(questionQueueFile);
+        if (!ifs) { return; }
+        while (!questionQueue.isEmpty()) questionQueue.dequeue();
+        string line;
+        while (getline(ifs, line)) {
+            if (!line.empty()) {
+                size_t comma_pos = line.find(',');
+                if (comma_pos != string::npos) {
+                    string name = line.substr(0, comma_pos);
+                    string question = line.substr(comma_pos + 1);
+                    questionQueue.enqueue(Question(name, question));
+                }
+            }
+        }
+        ifs.close();
+    }
+
+    void loadAllDataFromCsvFiles() {
+        loadParticipantsFromFile();
+        loadAnsweredQuestionsFromFile();
+        loadSchedulesFromFile();
+        loadQuestionQueueFromFile();
+    }
+
 public:
-    SeminarManager() { loadAllDataFromFile(); }
-    // Pendaftaran peserta
+    SeminarManager() { loadAllDataFromCsvFiles(); }
+
     void registerParticipant(string name) {
+        for (const auto& p : participants) {
+            if (p.name == name) {
+                cout << "Nama peserta sudah terdaftar!\n";
+                return;
+            }
+        }
         participants.push_back(Participant(name));
-        saveAllDataToFile();
+        saveAllDataToCsvFiles();
         cout << name << " berhasil terdaftar!\n";
     }
 
-    // Menampilkan daftar peserta dengan sorting berdasarkan waktu pendaftaran
     void showParticipants(bool ascending) {
         if (participants.empty()) {
             cout << "Belum ada peserta yang terdaftar.\n";
             return;
         }
-        sort(participants.begin(), participants.end(), [ascending](const Participant &a, const Participant &b) {
+        // Buat salinan untuk pengurutan agar tidak mengubah urutan pendaftaran asli jika diperlukan di tempat lain
+        vector<Participant> sortedParticipants = participants;
+        sort(sortedParticipants.begin(), sortedParticipants.end(), [ascending](const Participant &a, const Participant &b) {
             return ascending ? a.registrationTime < b.registrationTime : a.registrationTime > b.registrationTime;
         });
 
         cout << "\nDaftar Peserta (Urutan " << (ascending ? "Terlama ke Terbaru" : "Terbaru ke Terlama") << "):\n";
-        for (size_t i = 0; i < participants.size(); i++) {
-            cout << i + 1 << ". " << participants[i].name << " (Terdaftar: " << ctime(&participants[i].registrationTime) << ")";
+        for (size_t i = 0; i < sortedParticipants.size(); i++) {
+            // Gunakan put_time untuk output terformat dari registrationTime
+            cout << i + 1 << ". " << sortedParticipants[i].name << " (Terdaftar: "
+                 << put_time(localtime(&sortedParticipants[i].registrationTime), "%Y-%m-%d %H:%M:%S") << ")\n";
         }
     }
 
-    // Menambahkan pertanyaan ke dalam queue
-    void askQuestion(string name) {
-        questionQueue.enqueue(name);
-        saveAllDataToFile();
+    void displayParticipantsForSelection() { // Bantuan untuk hapus/perbarui
+        if (participants.empty()) {
+            // Pesan ini mungkin tidak diperlukan jika sudah diperiksa di menu utama
+            // cout << "Belum ada peserta yang terdaftar.\n";
+            return;
+        }
+        cout << "\nDaftar Peserta Saat Ini:\n";
+        for (size_t i = 0; i < participants.size(); i++) {
+            cout << i + 1 << ". " << participants[i].name << " (Terdaftar: "
+                 << put_time(localtime(&participants[i].registrationTime), "%Y-%m-%d %H:%M:%S") << ")\n";
+        }
+    }
+
+
+    void askQuestion(const string& name, const string& question) {
+        questionQueue.enqueue(Question(name, question));
+        saveAllDataToCsvFiles();
         cout << name << " telah menambahkan pertanyaan ke dalam antrian.\n";
     }
 
-    // Menjawab pertanyaan berdasarkan antrian FIFO dan menyimpan jawaban
     void answerQuestion() {
         if (questionQueue.isEmpty()) {
             cout << "Tidak ada pertanyaan dalam antrian.\n";
             return;
         }
-        string questioner = questionQueue.peek();
-        questionQueue.dequeue();
-        saveAllDataToFile();
+        string questioner = questionQueue.peek().name;
+        questionQueue.dequeue(); // Dequeue terlebih dahulu
+
         string answer;
         cout << "Menjawab pertanyaan dari: " << questioner << endl;
         cout << "Masukkan jawaban: ";
+        // cin.ignore() sebelum getline jika input sebelumnya adalah cin >>
+        // Mengasumsikan answerQuestion dipanggil dari menu di mana cin.ignore ditangani setelah pilihan
         getline(cin, answer);
+        while (answer.empty()){
+            cout << "Jawaban tidak boleh kosong. Masukkan jawaban: ";
+            getline(cin, answer);
+        }
+
         answeredQuestions.push_back({questioner, answer});
-        saveAllDataToFile();
+        saveAllDataToCsvFiles(); // Simpan setelah semua operasi untuk fungsi ini selesai
         cout << "Jawaban telah disimpan.\n";
     }
 
-    // Menampilkan daftar pertanyaan yang telah dijawab
     void showAnsweredQuestions() {
         if (answeredQuestions.empty()) {
             cout << "Belum ada pertanyaan yang dijawab.\n";
             return;
         }
-
         cout << "\n=== Daftar Pertanyaan yang Sudah Dijawab ===\n";
         for (size_t i = 0; i < answeredQuestions.size(); i++) {
             cout << i + 1 << ". " << answeredQuestions[i].first << " -> " << answeredQuestions[i].second << endl;
         }
     }
 
-    // Menambahkan topik atau jadwal seminar ke dalam vector
     void addSchedule(string date, string topic) {
         history.push({date, topic});
-        saveAllDataToFile();
+        saveAllDataToCsvFiles();
         cout << "Jadwal seminar '" << topic << "' pada " << date << " berhasil ditambahkan.\n";
     }
 
-    // Undo topik/jadwal terakhir
     void undoSchedule() {
         if (history.isEmpty()) {
             cout << "Tidak ada jadwal yang bisa di-undo.\n";
@@ -336,17 +457,15 @@ public:
         }
         pair<string, string> lastSchedule = history.peek();
         history.pop();
-        saveAllDataToFile();
+        saveAllDataToCsvFiles();
         cout << "Undo jadwal: " << lastSchedule.second << " pada " << lastSchedule.first << endl;
     }
 
-    // Menampilkan sertifikat peserta
     void showCertificates() {
         if (participants.empty()) {
             cout << "Belum ada peserta yang terdaftar.\n";
             return;
         }
-
         cout << "\n=== Sertifikat Peserta ===\n";
         for (size_t i = 0; i < participants.size(); i++) {
             cout << "\nPeserta " << i + 1 << ":\n";
@@ -354,160 +473,155 @@ public:
         }
     }
 
-    // Delete participant by name
     void deleteParticipant(const string& name) {
         auto it = remove_if(participants.begin(), participants.end(), [&](const Participant& p){ return p.name == name; });
         if (it != participants.end()) {
             participants.erase(it, participants.end());
-            saveAllDataToFile();
+            saveAllDataToCsvFiles();
             cout << "Peserta " << name << " berhasil dihapus.\n";
         } else {
-            cout << "Peserta tidak ditemukan.\n";
+            cout << "Peserta '" << name << "' tidak ditemukan.\n";
         }
     }
-    // Update participant name
+
     void updateParticipant(const string& oldName, const string& newName) {
+        // Pertama, periksa apakah newName sudah ada (jika nama harus unik)
+        bool newNameExists = false;
+        for (const auto& p : participants) {
+            if (p.name == newName) {
+                newNameExists = true;
+                break;
+            }
+        }
+        if (newNameExists) {
+             cout << "Nama peserta '" << newName << "' sudah digunakan. Pilih nama lain.\n";
+             return;
+        }
+
         bool found = false;
         for (auto& p : participants) {
             if (p.name == oldName) {
                 p.name = newName;
                 found = true;
+                break;
             }
         }
         if (found) {
-            saveAllDataToFile();
-            cout << "Nama peserta berhasil diupdate.\n";
+            saveAllDataToCsvFiles();
+            cout << "Nama peserta berhasil diupdate dari " << oldName << " ke " << newName << ".\n";
         } else {
-            cout << "Peserta tidak ditemukan.\n";
+            cout << "Peserta dengan nama '" << oldName << "' tidak ditemukan.\n";
         }
     }
-    // Delete answered question by index (1-based)
+
     void deleteAnsweredQuestion(int idx) {
-        if (idx < 1 || idx > (int)answeredQuestions.size()) {
+        if (idx < 1 || idx > static_cast<int>(answeredQuestions.size())) {
             cout << "Indeks tidak valid.\n";
             return;
         }
         answeredQuestions.erase(answeredQuestions.begin() + idx - 1);
-        saveAllDataToFile();
+        saveAllDataToCsvFiles();
         cout << "Pertanyaan berhasil dihapus.\n";
     }
-    // Update answered question by index (1-based)
+
     void updateAnsweredQuestion(int idx, const string& newAnswer) {
-        if (idx < 1 || idx > (int)answeredQuestions.size()) {
+        if (idx < 1 || idx > static_cast<int>(answeredQuestions.size())) {
             cout << "Indeks tidak valid.\n";
             return;
         }
         answeredQuestions[idx - 1].second = newAnswer;
-        saveAllDataToFile();
+        saveAllDataToCsvFiles();
         cout << "Jawaban berhasil diupdate.\n";
     }
-    // Delete schedule by index (1-based, from bottom)
-    void deleteSchedule(int idx) {
-        vector<pair<string, string>> temp;
-        auto copy = history.clone();
-        while (!copy.isEmpty()) {
-            temp.push_back(copy.peek());
-            copy.pop();
-        }
-        if (idx < 1 || idx > (int)temp.size()) {
+
+    void deleteSchedule(int idx) { // idx berbasis 1 dari bawah stack (paling lama)
+        vector<pair<string, string>> temp = history.getAllElements(); // dari bawah ke atas
+        if (idx < 1 || idx > static_cast<int>(temp.size())) {
             cout << "Indeks tidak valid.\n";
             return;
         }
-        temp.erase(temp.begin() + (idx - 1));
-        // Rebuild stack
+        temp.erase(temp.begin() + (idx - 1)); // Hapus berdasarkan vektor 0-indeks
+
+        // Bangun ulang stack
         while (!history.isEmpty()) history.pop();
-        for (auto it = temp.rbegin(); it != temp.rend(); ++it) {
-            history.push(*it);
+        for (const auto& item : temp) { // temp sudah dari bawah ke atas
+            history.push(item);
         }
-        saveAllDataToFile();
+        saveAllDataToCsvFiles();
         cout << "Jadwal berhasil dihapus.\n";
     }
-    // Update schedule by index (1-based, from bottom)
-    void updateSchedule(int idx, const string& newDate, const string& newTopic) {
-        vector<pair<string, string>> temp;
-        auto copy = history.clone();
-        while (!copy.isEmpty()) {
-            temp.push_back(copy.peek());
-            copy.pop();
-        }
-        if (idx < 1 || idx > (int)temp.size()) {
+
+    void updateSchedule(int idx, const string& newDate, const string& newTopic) { // idx berbasis 1 dari bawah
+        vector<pair<string, string>> temp = history.getAllElements(); // dari bawah ke atas
+        if (idx < 1 || idx > static_cast<int>(temp.size())) {
             cout << "Indeks tidak valid.\n";
             return;
         }
-        temp[idx - 1] = {newDate, newTopic};
-        // Rebuild stack
+        temp[idx - 1] = {newDate, newTopic}; // Perbarui berdasarkan vektor 0-indeks
+
+        // Bangun ulang stack
         while (!history.isEmpty()) history.pop();
-        for (auto it = temp.rbegin(); it != temp.rend(); ++it) {
-            history.push(*it);
+        for (const auto& item : temp) {
+            history.push(item);
         }
-        saveAllDataToFile();
+        saveAllDataToCsvFiles();
         cout << "Jadwal berhasil diupdate.\n";
     }
-    // Delete question from queue by index (1-based, front is 1)
-    void deleteQuestionFromQueue(int idx) {
-        vector<string> temp;
-        auto copy = questionQueue.clone();
-        while (!copy.isEmpty()) {
-            temp.push_back(copy.peek());
-            copy.dequeue();
-        }
-        if (idx < 1 || idx > (int)temp.size()) {
+
+    void deleteQuestionFromQueue(int idx) { // idx berbasis 1 dari depan
+        vector<Question> temp = questionQueue.getAllElements(); // dari depan ke belakang
+        if (idx < 1 || idx > static_cast<int>(temp.size())) {
             cout << "Indeks tidak valid.\n";
             return;
         }
         temp.erase(temp.begin() + (idx - 1));
-        // Rebuild queue
+
+        // Bangun ulang queue
         while (!questionQueue.isEmpty()) questionQueue.dequeue();
         for (const auto& q : temp) questionQueue.enqueue(q);
-        saveAllDataToFile();
+        saveAllDataToCsvFiles();
         cout << "Pertanyaan dalam antrian berhasil dihapus.\n";
     }
-    // Update question in queue by index (1-based, front is 1)
-    void updateQuestionInQueue(int idx, const string& newName) {
-        vector<string> temp;
-        auto copy = questionQueue.clone();
-        while (!copy.isEmpty()) {
-            temp.push_back(copy.peek());
-            copy.dequeue();
-        }
-        if (idx < 1 || idx > (int)temp.size()) {
+
+    void updateQuestionInQueue(int idx, const string& newName, const string& newQuestion) { // idx berbasis 1 dari depan
+        vector<Question> temp = questionQueue.getAllElements(); // dari depan ke belakang
+        if (idx < 1 || idx > static_cast<int>(temp.size())) {
             cout << "Indeks tidak valid.\n";
             return;
         }
-        temp[idx - 1] = newName;
-        // Rebuild queue
+        temp[idx - 1] = Question(newName, newQuestion);
+
+        // Bangun ulang queue
         while (!questionQueue.isEmpty()) questionQueue.dequeue();
         for (const auto& q : temp) questionQueue.enqueue(q);
-        saveAllDataToFile();
+        saveAllDataToCsvFiles();
         cout << "Pertanyaan dalam antrian berhasil diupdate.\n";
     }
 
-    // Expose history for menu display
     const Stack<pair<string, string>>& getHistory() const { return history; }
-    const Queue<string>& getQuestionQueue() const { return questionQueue; }
+    const Queue<Question>& getQuestionQueue() const { return questionQueue; }
+    const vector<Participant>& getParticipants() const { return participants; }
+    const vector<pair<string, string>>& getAnsweredQuestions() const { return answeredQuestions; } // <-- FUNGSI YANG DIPERBAIKI/DITAMBAHKAN
 };
 
-// Fungsi tampilan header
 void showHeader() {
     cout << "========================================\n";
     cout << "        SEMINAR/WEBINAR MANAGER\n";
     cout << "========================================\n";
 }
 
-// Fungsi validasi format tanggal YYYY-MM-DD
 bool isValidDateFormat(const string& date) {
-    // Regex cek format
     if (!regex_match(date, regex("\\d{4}-\\d{2}-\\d{2}"))) return false;
     int year, month, day;
     char dash1, dash2;
     istringstream iss(date);
     iss >> year >> dash1 >> month >> dash2 >> day;
-    if (dash1 != '-' || dash2 != '-') return false;
+
+    if (iss.fail() || dash1 != '-' || dash2 != '-') return false; // Periksa kegagalan parsing
     if (month < 1 || month > 12) return false;
     if (day < 1) return false;
-    // Days in month
-    int daysInMonth[] = {31,28,31,30,31,30,31,31,30,31,30,31};
-    // Leap year check
+
+    int daysInMonth[] = {0, 31,28,31,30,31,30,31,31,30,31,30,31}; // Indeks 0 tidak digunakan
     if (month == 2) {
         bool leap = (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0));
         if (leap) {
@@ -516,27 +630,38 @@ bool isValidDateFormat(const string& date) {
             if (day > 28) return false;
         }
     } else {
-        if (day > daysInMonth[month-1]) return false;
+         if (month > 12) return false; // Periksa tambahan jika month > 12 sebelum mengakses daysInMonth
+        if (day > daysInMonth[month]) return false;
     }
-    // Tambahan: tanggal tidak boleh di masa lalu
-    tm inputDate = {};
-    inputDate.tm_year = year - 1900;
-    inputDate.tm_mon = month - 1;
-    inputDate.tm_mday = day;
-    inputDate.tm_hour = 0; inputDate.tm_min = 0; inputDate.tm_sec = 0;
-    time_t inputTime = mktime(&inputDate);
+
+    tm inputDateTm = {};
+    inputDateTm.tm_year = year - 1900;
+    inputDateTm.tm_mon = month - 1;
+    inputDateTm.tm_mday = day;
+    inputDateTm.tm_hour = 0; inputDateTm.tm_min = 0; inputDateTm.tm_sec = 0;
+    inputDateTm.tm_isdst = -1; // Biarkan mktime mencari tahu DST
+    time_t inputTime = mktime(&inputDateTm);
+
+    if (inputTime == -1) return false; // Komponen tanggal tidak valid membuat mktime gagal
+
     time_t now = time(0);
-    tm* nowTm = localtime(&now);
-    nowTm->tm_hour = 0; nowTm->tm_min = 0; nowTm->tm_sec = 0;
-    time_t today = mktime(nowTm);
-    if (difftime(inputTime, today) < 0) return false; // tanggal sebelum hari ini
-    return true;
+    tm nowLocalTmStruct; // Gunakan struct baru, jangan pointer ke memori statis localtime
+    #ifdef _WIN32
+        localtime_s(&nowLocalTmStruct, &now); // Windows specific
+    #else
+        localtime_r(&now, &nowLocalTmStruct); // POSIX specific (thread-safe)
+    #endif
+
+    nowLocalTmStruct.tm_hour = 0; nowLocalTmStruct.tm_min = 0; nowLocalTmStruct.tm_sec = 0;
+    time_t today = mktime(&nowLocalTmStruct);
+
+    return difftime(inputTime, today) >= 0; // Tanggal harus hari ini atau di masa depan
 }
 
 int main() {
     SeminarManager manager;
-    int choice;
-    
+    int mainChoice;
+
     while (true) {
         showHeader();
         cout << "\n=== MENU UTAMA ===\n";
@@ -546,11 +671,17 @@ int main() {
         cout << "4. Lihat Sertifikat Peserta\n";
         cout << "5. Keluar\n";
         cout << "Pilih menu utama: ";
-        int mainChoice;
+
         cin >> mainChoice;
-        cin.ignore();
+        if (cin.fail()) {
+            cin.clear(); // Hapus flag error
+            cin.ignore(numeric_limits<streamsize>::max(), '\n'); // Buang input tidak valid
+            cout << "Input tidak valid. Silakan masukkan angka.\n";
+            continue;
+        }
+        cin.ignore(numeric_limits<streamsize>::max(), '\n'); // Buang sisa baris
+
         if (mainChoice == 1) {
-            // Peserta submenu
             while (true) {
                 cout << "\n=== MENU PESERTA ===\n";
                 cout << "1. Pendaftaran Peserta\n";
@@ -561,15 +692,36 @@ int main() {
                 cout << "Pilih menu: ";
                 int sub;
                 cin >> sub;
-                cin.ignore();
+                if (cin.fail()) {
+                    cin.clear();
+                    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                    cout << "Input tidak valid. Silakan masukkan angka.\n";
+                    continue;
+                }
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
                 if (sub == 1) {
                     string name;
+                    bool name_is_valid_for_registration;
                     do {
+                        name_is_valid_for_registration = true; // Asumsikan true pada awalnya
                         cout << "Masukkan nama peserta: ";
                         getline(cin, name);
-                        if (name.empty()) cout << "Nama peserta tidak boleh kosong!\n";
-                    } while (name.empty());
-                    manager.registerParticipant(name);
+                        if (name.empty()) {
+                            cout << "Nama peserta tidak boleh kosong!\n";
+                            name_is_valid_for_registration = false;
+                        } else {
+                            // Periksa duplikat secara lokal sebelum memanggil manajer untuk memberikan umpan balik segera untuk entri ulang
+                            for (const auto& p : manager.getParticipants()) {
+                                if (p.name == name) {
+                                    cout << "Nama peserta sudah terdaftar! Silakan masukkan nama lain.\n";
+                                    name_is_valid_for_registration = false;
+                                    break;
+                                }
+                            }
+                        }
+                    } while (!name_is_valid_for_registration);
+                    manager.registerParticipant(name); // Manajer akan melakukan pemeriksaan akhir dan menambahkan
                 } else if (sub == 2) {
                     int sortChoice;
                     cout << "\nPilih metode sorting:\n";
@@ -577,10 +729,20 @@ int main() {
                     cout << "2. Terbaru ke Terlama (Descending)\n";
                     cout << "Pilih: ";
                     cin >> sortChoice;
-                    cin.ignore();
+                     if (cin.fail() || (sortChoice != 1 && sortChoice != 2)) {
+                        cin.clear();
+                        cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                        cout << "Pilihan sorting tidak valid.\n";
+                        continue;
+                    }
+                    cin.ignore(numeric_limits<streamsize>::max(), '\n');
                     manager.showParticipants(sortChoice == 1);
                 } else if (sub == 3) {
-                    manager.showParticipants(true);
+                    if (manager.getParticipants().empty()){
+                        cout << "Belum ada peserta untuk dihapus.\n";
+                        continue;
+                    }
+                    manager.displayParticipantsForSelection(); // Tampilkan peserta tanpa sorting
                     string name;
                     do {
                         cout << "Masukkan nama peserta yang ingin dihapus: ";
@@ -589,18 +751,26 @@ int main() {
                     } while (name.empty());
                     manager.deleteParticipant(name);
                 } else if (sub == 4) {
-                    manager.showParticipants(true);
+                     if (manager.getParticipants().empty()){
+                        cout << "Belum ada peserta untuk diupdate.\n";
+                        continue;
+                    }
+                    manager.displayParticipantsForSelection();
                     string oldName, newName;
                     do {
                         cout << "Masukkan nama peserta yang ingin diupdate: ";
                         getline(cin, oldName);
-                        if (oldName.empty()) cout << "Nama peserta tidak boleh kosong!\n";
+                        if (oldName.empty()) cout << "Nama peserta (lama) tidak boleh kosong!\n";
                     } while (oldName.empty());
                     do {
                         cout << "Masukkan nama baru: ";
                         getline(cin, newName);
                         if (newName.empty()) cout << "Nama baru tidak boleh kosong!\n";
-                    } while (newName.empty());
+                        else if (newName == oldName) {
+                            cout << "Nama baru tidak boleh sama dengan nama lama!\n";
+                            // Loop akan berlanjut karena newName.empty() adalah false
+                        }
+                    } while (newName.empty() || newName == oldName);
                     manager.updateParticipant(oldName, newName);
                 } else if (sub == 5) {
                     break;
@@ -608,12 +778,11 @@ int main() {
                     cout << "Pilihan tidak valid.\n";
                 }
             }
-        } else if (mainChoice == 2) {
-            // Pertanyaan submenu
+        } else if (mainChoice == 2) { // Menu Pertanyaan
             while (true) {
                 cout << "\n=== MENU PERTANYAAN ===\n";
-                cout << "1. Tambah Pertanyaan\n";
-                cout << "2. Jawab Pertanyaan\n";
+                cout << "1. Tambah Pertanyaan (oleh peserta)\n";
+                cout << "2. Jawab Pertanyaan (oleh admin/pembicara)\n";
                 cout << "3. Lihat Pertanyaan yang Sudah Dijawab\n";
                 cout << "4. Hapus Pertanyaan yang Sudah Dijawab\n";
                 cout << "5. Update Jawaban Pertanyaan\n";
@@ -623,103 +792,160 @@ int main() {
                 cout << "Pilih menu: ";
                 int sub;
                 cin >> sub;
-                cin.ignore();
+                if (cin.fail()) {
+                    cin.clear();
+                    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                    cout << "Input tidak valid. Silakan masukkan angka.\n";
+                    continue;
+                }
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
                 if (sub == 1) {
-                    string name;
+                    if (manager.getParticipants().empty()) {
+                        cout << "Belum ada peserta yang terdaftar. Tidak dapat menambah pertanyaan.\n";
+                        continue;
+                    }
+                    cout << "\nDaftar Peserta Terdaftar:\n";
+                    for (size_t i = 0; i < manager.getParticipants().size(); ++i) {
+                        cout << i + 1 << ". " << manager.getParticipants()[i].name << endl;
+                    }
+                    string name, question;
                     do {
                         cout << "Masukkan nama peserta yang ingin bertanya: ";
                         getline(cin, name);
                         if (name.empty()) cout << "Nama tidak boleh kosong!\n";
                     } while (name.empty());
-                    manager.askQuestion(name);
+                    do {
+                        cout << "Masukkan kalimat pertanyaan: ";
+                        getline(cin, question);
+                        if (question.empty()) cout << "Pertanyaan tidak boleh kosong!\n";
+                    } while (question.empty());
+                    manager.askQuestion(name, question);
                 } else if (sub == 2) {
+                    if (manager.getQuestionQueue().isEmpty()) {
+                        cout << "Tidak ada pertanyaan dalam antrian.\n";
+                        continue;
+                    }
+                    cout << "\nDaftar Peserta Terdaftar:\n";
+                    for (size_t i = 0; i < manager.getParticipants().size(); ++i) {
+                        cout << i + 1 << ". " << manager.getParticipants()[i].name << endl;
+                    }
+                    // Tampilkan pertanyaan yang akan dijawab
+                    vector<Question> temp = manager.getQuestionQueue().getAllElements();
+                    if (!temp.empty()) {
+                        cout << "\nPertanyaan berikut akan dijawab:\n";
+                        cout << "Dari: " << temp.front().name << endl;
+                        cout << "Pertanyaan: " << temp.front().question << endl;
+                    }
                     manager.answerQuestion();
                 } else if (sub == 3) {
                     manager.showAnsweredQuestions();
-                } else if (sub == 4) {
+                } else if (sub == 4) { // Hapus Pertanyaan yang Sudah Dijawab
+                    if (manager.getAnsweredQuestions().empty()){ // MENGGUNAKAN FUNGSI YANG DIPERBAIKI
+                         cout << "Belum ada pertanyaan dijawab untuk dihapus.\n";
+                         continue;
+                    }
                     manager.showAnsweredQuestions();
                     int idx;
                     cout << "Masukkan nomor pertanyaan yang ingin dihapus: ";
                     cin >> idx;
-                    cin.ignore();
+                    if (cin.fail()) { cin.clear(); cin.ignore(numeric_limits<streamsize>::max(), '\n'); cout << "Input indeks tidak valid.\n"; continue;}
+                    cin.ignore(numeric_limits<streamsize>::max(), '\n');
                     manager.deleteAnsweredQuestion(idx);
-                } else if (sub == 5) {
+                } else if (sub == 5) { // Update Jawaban Pertanyaan
+                    if (manager.getAnsweredQuestions().empty()){ // MENGGUNAKAN FUNGSI YANG DIPERBAIKI
+                         cout << "Belum ada pertanyaan dijawab untuk diupdate.\n";
+                         continue;
+                    }
                     manager.showAnsweredQuestions();
                     int idx;
                     string newAnswer;
                     cout << "Masukkan nomor pertanyaan yang ingin diupdate: ";
                     cin >> idx;
-                    cin.ignore();
+                    if (cin.fail()) { cin.clear(); cin.ignore(numeric_limits<streamsize>::max(), '\n'); cout << "Input indeks tidak valid.\n"; continue;}
+                    cin.ignore(numeric_limits<streamsize>::max(), '\n');
                     do {
                         cout << "Masukkan jawaban baru: ";
                         getline(cin, newAnswer);
                         if (newAnswer.empty()) cout << "Jawaban tidak boleh kosong!\n";
                     } while (newAnswer.empty());
                     manager.updateAnsweredQuestion(idx, newAnswer);
-                } else if (sub == 6) {
-                    vector<string> temp;
-                    auto copy = manager.getQuestionQueue().clone();
-                    while (!copy.isEmpty()) {
-                        temp.push_back(copy.peek());
-                        copy.dequeue();
+                } else if (sub == 6) { // Hapus Pertanyaan dalam Antrian
+                    if (manager.getQuestionQueue().isEmpty()){
+                         cout << "Antrian pertanyaan kosong.\n";
+                         continue;
                     }
+                    vector<Question> temp = manager.getQuestionQueue().getAllElements();
                     cout << "\nDaftar Pertanyaan dalam Antrian (dari depan):\n";
                     for (size_t i = 0; i < temp.size(); ++i) {
-                        cout << i + 1 << ". " << temp[i] << endl;
+                        cout << i + 1 << ". " << temp[i].name << " : " << temp[i].question << endl;
                     }
                     int idx;
                     cout << "Masukkan nomor pertanyaan dalam antrian yang ingin dihapus (dari depan): ";
                     cin >> idx;
-                    cin.ignore();
+                    if (cin.fail()) { cin.clear(); cin.ignore(numeric_limits<streamsize>::max(), '\n'); cout << "Input indeks tidak valid.\n"; continue;}
+                    cin.ignore(numeric_limits<streamsize>::max(), '\n');
                     manager.deleteQuestionFromQueue(idx);
-                } else if (sub == 7) {
-                    vector<string> temp;
-                    auto copy = manager.getQuestionQueue().clone();
-                    while (!copy.isEmpty()) {
-                        temp.push_back(copy.peek());
-                        copy.dequeue();
+                } else if (sub == 7) { // Update Pertanyaan dalam Antrian
+                     if (manager.getQuestionQueue().isEmpty()){
+                         cout << "Antrian pertanyaan kosong.\n";
+                         continue;
                     }
+                    vector<Question> temp = manager.getQuestionQueue().getAllElements();
                     cout << "\nDaftar Pertanyaan dalam Antrian (dari depan):\n";
                     for (size_t i = 0; i < temp.size(); ++i) {
-                        cout << i + 1 << ". " << temp[i] << endl;
+                        cout << i + 1 << ". " << temp[i].name << " : " << temp[i].question << endl;
                     }
                     int idx;
-                    string newName;
+                    string newName, newQuestion;
                     cout << "Masukkan nomor pertanyaan dalam antrian yang ingin diupdate (dari depan): ";
                     cin >> idx;
-                    cin.ignore();
+                    if (cin.fail()) { cin.clear(); cin.ignore(numeric_limits<streamsize>::max(), '\n'); cout << "Input indeks tidak valid.\n"; continue;}
+                    cin.ignore(numeric_limits<streamsize>::max(), '\n');
                     do {
-                        cout << "Masukkan nama baru: ";
+                        cout << "Masukkan nama peserta baru: ";
                         getline(cin, newName);
-                        if (newName.empty()) cout << "Nama baru tidak boleh kosong!\n";
+                        if (newName.empty()) cout << "Nama tidak boleh kosong!\n";
                     } while (newName.empty());
-                    manager.updateQuestionInQueue(idx, newName);
+                    do {
+                        cout << "Masukkan kalimat pertanyaan baru: ";
+                        getline(cin, newQuestion);
+                        if (newQuestion.empty()) cout << "Pertanyaan tidak boleh kosong!\n";
+                    } while (newQuestion.empty());
+                    manager.updateQuestionInQueue(idx, newName, newQuestion);
                 } else if (sub == 8) {
                     break;
                 } else {
                     cout << "Pilihan tidak valid.\n";
                 }
             }
-        } else if (mainChoice == 3) {
-            // Jadwal submenu
+        } else if (mainChoice == 3) { // Menu Jadwal Seminar
             while (true) {
                 cout << "\n=== MENU JADWAL SEMINAR ===\n";
                 cout << "1. Tambah Jadwal Seminar\n";
                 cout << "2. Undo Jadwal Seminar\n";
                 cout << "3. Hapus Jadwal Seminar\n";
                 cout << "4. Update Jadwal Seminar\n";
-                cout << "5. Kembali ke Menu Utama\n";
+                cout << "5. Lihat Daftar Jadwal Seminar\n";
+                cout << "6. Kembali ke Menu Utama\n";
                 cout << "Pilih menu: ";
                 int sub;
                 cin >> sub;
-                cin.ignore();
+                 if (cin.fail()) {
+                    cin.clear();
+                    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+                    cout << "Input tidak valid. Silakan masukkan angka.\n";
+                    continue;
+                }
+                cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
                 if (sub == 1) {
                     string date, topic;
                     do {
                         cout << "Masukkan tanggal seminar (YYYY-MM-DD): ";
                         getline(cin, date);
                         if (date.empty()) cout << "Tanggal tidak boleh kosong!\n";
-                        else if (!isValidDateFormat(date)) cout << "Format tanggal tidak valid! Gunakan YYYY-MM-DD dan pastikan tanggal benar.\n";
+                        else if (!isValidDateFormat(date)) cout << "Format tanggal tidak valid! Gunakan YYYY-MM-DD, pastikan tanggal benar dan tidak di masa lalu.\n";
                     } while (date.empty() || !isValidDateFormat(date));
                     do {
                         cout << "Masukkan topik seminar: ";
@@ -729,43 +955,44 @@ int main() {
                     manager.addSchedule(date, topic);
                 } else if (sub == 2) {
                     manager.undoSchedule();
-                } else if (sub == 3) {
-                    vector<pair<string, string>> temp;
-                    auto copy = manager.getHistory().clone();
-                    while (!copy.isEmpty()) {
-                        temp.push_back(copy.peek());
-                        copy.pop();
+                } else if (sub == 3) { // Hapus Jadwal Seminar
+                    if (manager.getHistory().isEmpty()){
+                         cout << "Tidak ada jadwal untuk dihapus.\n";
+                         continue;
                     }
-                    cout << "\nDaftar Jadwal (dari bawah):\n";
+                    vector<pair<string, string>> temp = manager.getHistory().getAllElements(); // dari bawah ke atas
+                    cout << "\nDaftar Jadwal (dari yang paling lama ditambahkan):\n";
                     for (size_t i = 0; i < temp.size(); ++i) {
-                        cout << i + 1 << ". " << temp[i].first << " - " << temp[i].second << endl;
+                        cout << i + 1 << ". Tanggal: " << temp[i].first << " - Topik: " << temp[i].second << endl;
                     }
                     int idx;
-                    cout << "Masukkan nomor jadwal yang ingin dihapus (dari bawah): ";
+                    cout << "Masukkan nomor jadwal yang ingin dihapus (berdasarkan daftar di atas): ";
                     cin >> idx;
-                    cin.ignore();
+                    if (cin.fail()) { cin.clear(); cin.ignore(numeric_limits<streamsize>::max(), '\n'); cout << "Input indeks tidak valid.\n"; continue;}
+                    cin.ignore(numeric_limits<streamsize>::max(), '\n');
                     manager.deleteSchedule(idx);
-                } else if (sub == 4) {
-                    vector<pair<string, string>> temp;
-                    auto copy = manager.getHistory().clone();
-                    while (!copy.isEmpty()) {
-                        temp.push_back(copy.peek());
-                        copy.pop();
+                } else if (sub == 4) { // Update Jadwal Seminar
+                     if (manager.getHistory().isEmpty()){
+                         cout << "Tidak ada jadwal untuk diupdate.\n";
+                         continue;
                     }
-                    cout << "\nDaftar Jadwal (dari bawah):\n";
-                    for (size_t i = 0; i < temp.size(); ++i) {
-                        cout << i + 1 << ". " << temp[i].first << " - " << temp[i].second << endl;
+                    vector<pair<string, string>> temp = manager.getHistory().getAllElements(); // dari bawah ke atas
+                    cout << "\nDaftar Jadwal (dari yang paling lama ditambahkan):\n";
+                     for (size_t i = 0; i < temp.size(); ++i) {
+                        cout << i + 1 << ". Tanggal: " << temp[i].first << " - Topik: " << temp[i].second << endl;
                     }
                     int idx;
                     string newDate, newTopic;
-                    cout << "Masukkan nomor jadwal yang ingin diupdate (dari bawah): ";
+                    cout << "Masukkan nomor jadwal yang ingin diupdate (berdasarkan daftar di atas): ";
                     cin >> idx;
-                    cin.ignore();
+                    if (cin.fail()) { cin.clear(); cin.ignore(numeric_limits<streamsize>::max(), '\n'); cout << "Input indeks tidak valid.\n"; continue;}
+                    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
                     do {
                         cout << "Masukkan tanggal baru (YYYY-MM-DD): ";
                         getline(cin, newDate);
                         if (newDate.empty()) cout << "Tanggal tidak boleh kosong!\n";
-                        else if (!isValidDateFormat(newDate)) cout << "Format tanggal tidak valid! Gunakan YYYY-MM-DD dan pastikan tanggal benar.\n";
+                        else if (!isValidDateFormat(newDate)) cout << "Format tanggal tidak valid! Gunakan YYYY-MM-DD, pastikan tanggal benar dan tidak di masa lalu.\n";
                     } while (newDate.empty() || !isValidDateFormat(newDate));
                     do {
                         cout << "Masukkan topik baru: ";
@@ -773,7 +1000,17 @@ int main() {
                         if (newTopic.empty()) cout << "Topik tidak boleh kosong!\n";
                     } while (newTopic.empty());
                     manager.updateSchedule(idx, newDate, newTopic);
-                } else if (sub == 5) {
+                } else if (sub == 5) { // Lihat Daftar Jadwal Seminar
+                    vector<pair<string, string>> temp = manager.getHistory().getAllElements();
+                    if (temp.empty()) {
+                        cout << "Belum ada jadwal seminar yang terdaftar.\n";
+                    } else {
+                        cout << "\nDaftar Jadwal Seminar (dari yang paling lama ditambahkan):\n";
+                        for (size_t i = 0; i < temp.size(); ++i) {
+                            cout << i + 1 << ". Tanggal: " << temp[i].first << " - Topik: " << temp[i].second << endl;
+                        }
+                    }
+                } else if (sub == 6) {
                     break;
                 } else {
                     cout << "Pilihan tidak valid.\n";
