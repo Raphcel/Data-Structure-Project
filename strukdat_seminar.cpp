@@ -144,7 +144,6 @@ template <typename T>
 class Queue {
 private:
     Node<T>* front;
-    Node<T>* front;
     Node<T>* rear;
     int count;
 public:
